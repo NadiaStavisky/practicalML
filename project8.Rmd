@@ -103,7 +103,7 @@ modrf <- train(classe ~ ., method= "rf", trControl = trCntr, data = training)
 ```
 
 ```{r}
-modgbm <- train(classe ~ ., method= "gbm",  trControl = trCntr, data = training)
+modgbm <- train(classe ~ ., method= "gbm",  trControl = trCntr, data = training, verbose=FALSE)
 modlda <- train(classe ~ ., method= "lda", trControl = trCntr, data = training)
 ```
 
