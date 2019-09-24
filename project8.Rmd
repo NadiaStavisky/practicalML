@@ -95,46 +95,35 @@ trCntr <- trainControl(method = "cv")
 
 Fit different models 
 - Random Forest;
-- boosting with trees;
-- Linear discriminant analisis;
-
-```{r model_fit}
+```{r model_fit_rf}
 modrf <- train(classe ~ ., method= "rf", trControl = trCntr, data = training)
 ```
-
-```{r}
+- boosting with trees;
+```{r model_fit_gbm}
 modgbm <- train(classe ~ ., method= "gbm",  trControl = trCntr, data = training, verbose=FALSE)
+```
+- Linear discriminant analisis;
+```{r model_fit_lda}
 modlda <- train(classe ~ ., method= "lda", trControl = trCntr, data = training)
 ```
-
 Avaluate models performance on training data set (train data).
 Avaluation metrics - set avaluation metrics to "Accuracy"
-
 ```{r}
-results <- resamples(list(lda=fit.lda, knn=fit.knn, gbm=fit.gbm, rf=fit.rf))
+results <- resamples(list(lda=modlda, gbm=modgbm, rf=modrf))
 summary(results)
 ```
-
-
 Apply models on testing data set
-
 ```{r}
-predictRF <- predict(fit.rf, newdata=ttest)
-confMatRF <- confusionMatrix(predictRF, ttest$classe)
+predictrf <- predict(modrf, newdata=testing)
+confMatrf <- confusionMatrix(predictRF, testing$classe)
 ```
-
-
-
 Avaluate models performance on testing data (train data).
 Avaluation metrics - set avaluation metrics to "Accuracy"
 ```{r}
 
 ```
-
 Predict the manner in which the exercise have been performed on initial test data
-
 ```{r}
-predictTest <- predict(model1, TestingData)
+predictTest <- predict(modrf, test)
 predictTest
 ```
-
