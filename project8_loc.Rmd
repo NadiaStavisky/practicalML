@@ -1,0 +1,195 @@
+---
+title: "practicalML_courseProject"
+author: "Nadia Stavisky"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, 
+                      message = FALSE,
+                      warning = FALSE)
+packages <- c("knitr", "caret", "pgmm","rpart", "gbm", "lubridate", "forecast", "e1071", "ggplot2","dplyr","randomForest")
+# ipak function: install and load multiple R packages.
+# check to see if packages are installed. Install them if they are not, then load them into the R session.
+ipak <- function(pkg){
+    new.pkg <- pkg[!(pkg %in% installed.packages()[, "Package"])]
+    if (length(new.pkg)) 
+        install.packages(new.pkg, dependencies = TRUE)
+    sapply(pkg, require, character.only = TRUE)
+}
+# usage
+ipak(packages)
+#set seed 12345
+set.seed(12345)
+
+```
+# intorduction
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement - a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website [here](http://web.archive.org/web/20161224072740/http:/groupware.les.inf.puc-rio.br/har) (see the section on the Weight Lifting Exercise Dataset).
+
+# Data used in the project:
+- [The training data](https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv) 
+- [The test data](https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv)
+
+*[The source of the data for this project](http://web.archive.org/web/20161224072740/http:/groupware.les.inf.puc-rio.br/har)
+*[The resource for the process for creating predictive models](http://topepo.github.io/caret/index.html) 
+```{r data_load, , cache = TRUE}
+test <- read.csv("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv")
+train <- read.csv("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv")
+#make working copies
+test_loaded <- test
+train_loaded <- train
+```
+
+# Project goal
+The goal of your project is to predict the manner in which they did the exercise. This is the "classe" variable in the training set. You may use any of the other variables to predict with. You should create a report describing how you built your model, how you used cross validation, what you think the expected out of sample error is, and why you made the choices you did. You will also use your prediction model to predict 20 different test cases.
+
+## Visualisation
+Data sets dimentious:
+- Train data:
+```{r dim_train}
+dim(train)
+```
+- Test data
+```{r dim_test}
+dim(test)
+```
+Check structure (Appendix A) and summary (Appendix B) of the Train data.
+
+Visualize responce variable 'Classe':
+```{r classen_h}
+classeh <- ggplot(train, aes(as.factor(classe))) +
+    geom_histogram(stat="count", color = "black", fill = "light blue") + 
+    labs(title = "Predicting variable overview (train data set) \n 'classe' variable - is the exercise performnce manner type")
+classeh
+```
+
+## Pre-processing
+Before starting to transform data sets check if variable names identical in the test and train data:
+```{r check_names}
+identical(names(train_loaded[,-160]), names(test_loaded[,-160]))
+```
+
+Summary look into data shows next issues to correct
+1 Convert response 'classe' from character into factor variable
+```{r classe}
+train$classe <- as.factor(train$classe)
+class(train$classe)
+str(train$classe)
+```
+2 Zero- and Near Zero-Variance Predictors
+The concern here that these predictors may become zero-variance predictors when the data are split into cross-validation/bootstrap sub-samples or that a few samples may have an undue influence on the model. These "near-zero-variance" predictors may need to be identified and eliminated prior to modeling.
+To identify these types of predictors, the following two metrics can be calculated:
+- the frequency of the most prevalent value over the second most frequent value (called the "frequency ratio''), which would be near one for well-behaved predictors and very large for highly-unbalanced data and
+- the "percent of unique values'' is the number of unique values divided by the total number of samples (times 100) that approaches zero as the granularity of the data increases
+```{r nzv}
+nzv <- nearZeroVar(train, saveMetrics = TRUE)
+remove_nzv <- nearZeroVar(train)
+train <- train[,-remove_nzv]
+test <- test[,-remove_nzv]
+dim(train) #36 variables have been remooved
+```
+3 Remove variables that are mostly NA (95%)
+```{r mean_NA}
+allNA    <- sapply(train, function(x) mean(is.na(x))) > 0.95 # 65 variables pending to be removed
+train <- train[, allNA==FALSE] 
+test <- test[, allNA == FALSE]
+```
+4 remove identification only variables (columns 1 to 7)
+```{r ID_vars}
+train <- train[,-c(1:7)]
+test <- test[,-c(1:7)]
+```
+all data cleaning steps performed both on train and test datasets.
+check data set dimensions after pre-processing steps
+- Train data:
+```{r dim_train2}
+dim(train)
+```
+- Test data:
+```{r dim_test2}
+dim(test)
+```
+
+## Data Splitting
+We will use simple splitting Train data into "training" and "testing" data sets based on the outcome
+```{r data_split}
+trainIndex <- createDataPartition(train$classe, p = .7, 
+                                  list = FALSE)
+training <- train[trainIndex,]
+testing <- train[trainIndex,]
+```
+
+## Models training and tuning
+Set up parameters to control models training process.
+Resampling - repeatedly drawing samples from a training set and re???tting a model of interest on each sample in order to obtain additional information about the ???tted model.
+In our tuning process we will use Cross - Validation method:set of training data set observations are randomly split into a training set and a validation set. The statistical learning method is ???t on the training set, and its performance is evaluated on the validation set.
+We are setting up number of resampling iterations to 5 due to too time consuming model training process
+```{r fitControl}
+fitControl <- trainControl(method = "cv",
+                           number = 5,
+                           #repeats = 3, #repeats` has no meaning for this resampling method
+                           verboseIter = FALSE)
+```
+
+### Random Forest
+```{r RF_model, cache = TRUE}
+model_rf <- train(classe ~ ., method = "rf", trControl = fitControl, data = training, tuneLength = 1)
+```
+### Gradient Boosting
+```{r GBM_model, cache = TRUE}
+model_gbm <- train(classe ~ ., method = "gbm", trControl = fitControl, data = training, verbose = FALSE)
+```
+### Linear Discriminant Analysis
+```{r LDA_model, cache = TRUE}
+model_lda <- train(classe ~ ., method = "lda", trControl = fitControl, data = training)
+```
+
+## Measuring Performance
+Compute the confusion matrix, which shows a cross-tabulation of the observed and predicted classes.
+```{r accuracy_kappa}
+#generates the accuracy and Kappa statistics:
+Acc_Kappa <- cbind(c("RF", "GBM", "LDA"),rbind(postResample(predict(model_rf, training), training$class),
+                   postResample(predict(model_gbm, training), training$class),
+                   postResample(predict(model_lda, training), training$class)))
+Acc_Kappa
+```
+### Between-Models
+Given these models, can we make statistical statements about their performance differences? To do this, we first collect the resampling results using resamples.
+```{r model_perf_stats}
+resamps <- resamples(list(RF = model_rf,
+                          GBM = model_gbm,
+                          LDA = model_lda))
+resamps
+summary(resamps)
+```
+Since models are fit on the same versions of the training data, it makes sense to make inferences on the differences between models. In this way we reduce the within-resample correlation that may exist. We can compute the differences, then use a simple t-test to evaluate the null hypothesis that there is no difference between models.
+```{r model_perf_stats_diff}
+difValues <- diff(resamps)
+difValues
+summary(difValues)
+```
+
+# Extracting Predictions
+For predicting responce on Test data  we will use Rendom Forest model as it shows best performance.
+Applying rendom forest model on test data set gives us next predicted 'classe':
+```{r predicted_classe}
+predict(model_rf, newdata = test)
+```
+
+
+# Appendix A. Train data structure.
+```{r str_train}
+str(train)
+```
+
+# Appendix B. Train data summary.
+```{r summary_train}
+summary(train)
+```
+#Appendix C. Session information.
+```{r sessionInfo}
+sessionInfo()
+```
+
+
